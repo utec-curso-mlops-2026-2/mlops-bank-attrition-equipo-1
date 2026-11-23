@@ -1,1 +1,10 @@
-# Añadir las dependencias del proyecto con versiones fijadas.
+# Dependencias de ejecución (versiones fijadas; probadas con Python 3.12/3.13)
+boto3==1.44.9
+matplotlib==3.11.2
+mlflow==3.18.0
+numpy==2.5.3
+pandas==3.0.5
+PyYAML==6.0.3
+scikit-learn==1.9.1
+scipy==1.18.1
+SQLAlchemy==2.0.58
