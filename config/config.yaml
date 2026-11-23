@@ -1,0 +1,85 @@
+# Configuración del pipeline de entrenamiento (R2). Nada de esto vive en el código.
+# Las rutas relativas se resuelven desde la raíz del repo.
+
+project:
+  random_seed: 42
+  author: ${USER_NAME}          # variable de entorno USER_NAME (si no existe usa $USER o "unknown")
+
+data:
+  # source: "local" lee de data/raw/<release>/ ; "s3" descarga s3://<bucket>/<prefix>/<release>/ a data/raw/<release>/
+  source: local
+  release: "202408"             # versión (fecha de corte) de los datos crudos -> raw/<yyyymm>/
+  local_dir: data/raw
+  s3_bucket: ${MLOPS_DATA_BUCKET}
+  s3_prefix: raw
+  # Corrección de calidad de datos (ver docs/contrato_datos.md): en el train, CODMES=201208 es un error de
+  # codificación de 202408 (mes de referencia). Se aplica a clientes y requerimientos de AMBAS particiones.
+  codmes_corrections:
+    201208: 202408
+  # Filas de requerimientos idénticas: se conservan (no hay id de requerimiento para distinguir duplicados de reclamos
+  # repetidos; el impacto en el modelo es nulo, ver docs/eda_calidad_datos.md). Poner true para eliminarlas.
+  drop_duplicate_requirements: false
+  files:
+    train_clientes: train_clientes_sample.csv
+    train_requerimientos: train_requerimientos_sample.csv
+    oot_clientes: oot_clientes_sample.csv
+    oot_requerimientos: oot_requerimientos_sample.csv
+
+schema:
+  id_col: ID_CORRELATIVO
+  period_col: CODMES            # formato yyyymm; es el corte de cada cliente
+  target_col: ATTRITION
+  # columnas de clientes que NO son predictores (se ajustan tras revisar el diccionario)
+  drop_cols: []
+  # columnas de requerimientos
+  req_period_col: CODMES
+  req_numeric_cols: []          # requerimientos no traen columnas numéricas
+  req_categorical_cols: [TIPO_REQUERIMIENTO2, DICTAMEN]   # PRODUCTO/SUBMOTIVO (22/81 niveles) quedan fuera por ser muy dispersos
+  # Rangos ordenados (Rango_SDO_03, Rang_ingreso_05, "Cero" = 0): se convierten a número ordinal
+  ordinal_cols: [RANG_INGRESO, RANG_SDO_PASIVO_MENOS0, RANG_NRO_PRODUCTOS_MENOS0]
+
+features:
+  window_months: 6              # los requerimientos cubren mes -5 a 0 (6 meses, incluye el corte)
+  min_category_count: 20        # categorías de requerimientos con menos casos se agrupan en "otros"
+  max_categories_per_col: 10
+
+split:
+  test_size: 0.30
+  stratify: true
+
+models:
+  logistic_regression:
+    C: 0.5
+    max_iter: 500
+    class_weight: balanced
+  random_forest:
+    n_estimators: 300
+    max_depth: 8
+    min_samples_leaf: 50
+    class_weight: balanced_subsample
+    n_jobs: -1
+  hist_gradient_boosting:
+    max_depth: 4
+    learning_rate: 0.05
+    max_iter: 300
+    l2_regularization: 1.0
+
+selection:
+  cv_folds: 5
+  criterion: cv_auc_mean        # métrica sobre train (CV) usada para elegir; test solo se reporta
+  top_fractions: [0.10, 0.20]   # para lift y % de fugas capturadas
+
+mlflow:
+  tracking_uri: ${MLFLOW_TRACKING_URI}      # servidor remoto compartido; si no existe usa sqlite local (solo desarrollo)
+  fallback_tracking_uri: sqlite:///mlflow_local.db
+  experiment_name: ${MLFLOW_EXPERIMENT_NAME}
+  registered_model_name: bank-attrition-churn
+
+registry:
+  # Gate de validación: el modelo solo se promueve si cumple TODO.
+  # Calibrados con el EDA (modelo base: AUC≈0,85, KS≈0,55, captura top 20 %≈0,64) dejando margen.
+  min_test_auc: 0.80
+  min_test_ks: 0.45
+  min_capture_top20: 0.55
+  champion_alias: champion
+  challenger_alias: challenger
