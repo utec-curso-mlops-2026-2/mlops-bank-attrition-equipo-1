@@ -1,0 +1,11 @@
+# Solo entran a la imagen: requirements, pyproject, README, src/ y config/.
+*
+!requirements.txt
+!requirements-dev.txt
+!pyproject.toml
+!README.md
+!src/
+!config/
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
