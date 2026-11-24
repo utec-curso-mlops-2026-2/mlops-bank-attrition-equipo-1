@@ -1,0 +1,14 @@
+[Unit]
+Description=MLflow tracking server (equipo 1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mlflow
+WorkingDirectory=/opt/mlflow
+ExecStart=/opt/mlflow/mlflow-start.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

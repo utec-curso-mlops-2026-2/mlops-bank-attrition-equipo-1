@@ -87,40 +87,118 @@ def data_manifest(cfg: dict) -> dict:
     files = {}
     for logical, name in cfg["data"]["files"].items():
         path = folder / name
-        with open(path, "rb") as handle:
-            rows = max(sum(1 for _ in handle) - 1, 0)
-        files[logical] = {"filename": name, "rows": rows, "sha256": sha256_file(path)}
+        files[logical] = {"filename": name, "rows": row_count(path), "sha256": sha256_file(path)}
     return {"release": str(cfg["data"]["release"]), "uri": data_uri(cfg), "files": files}
 
 
+def row_count(path: str | Path) -> int | None:
+    """Filas de datos de un CSV (sin cabecera); None para otros formatos (p. ej. el diccionario .xlsx)."""
+    if Path(path).suffix.lower() != ".csv":
+        return None
+    with open(path, "rb") as handle:
+        return max(sum(1 for _ in handle) - 1, 0)
+
+
+def s3_key(cfg: dict, filename: str) -> str:
+    data = cfg["data"]
+    return f"{data['s3_prefix']}/{data['release']}/{filename}"
+
+
+def temporal_policy(cfg: dict) -> dict:
+    """Correcciones temporales aplicadas a los datos crudos (hoy: CODMES mal codificado)."""
+    fixes = {int(k): int(v) for k, v in (cfg["data"].get("codmes_corrections") or {}).items()}
+    return {
+        "status": "aplicada" if fixes else "sin cambios",
+        "decision_reference": "docs/decisiones.md; docs/eda_calidad_datos.md (hallazgo 1)",
+        "authorized_changes": [
+            {
+                "column": cfg["schema"]["period_col"], "from": old, "to": new,
+                "files": ["train_clientes", "train_requerimientos", "oot_clientes", "oot_requerimientos"],
+                "applied_in": "bank_attrition.data.apply_codmes_corrections (al leer; el archivo crudo no se modifica)",
+                "confirmation": "pendiente de confirmación docente",
+            }
+            for old, new in fixes.items()
+        ],
+    }
+
+
+def _manifest_files(cfg: dict) -> dict[str, str]:
+    """Archivos que registra el manifiesto: los del pipeline + los de referencia (diccionario)."""
+    data = cfg["data"]
+    return {**data["files"], **(data.get("reference_files") or {})}
+
+
+def _entries_from_s3(cfg: dict) -> dict[str, dict]:
+    """Registra la versión vigente de cada objeto en S3: descarga ESE VersionId y calcula SHA-256 y filas.
+
+    No usa la copia local de data/raw/ (podría estar desactualizada) ni el ETag (no es un hash del contenido).
+    """
+    import tempfile
+
+    import boto3  # import diferido: solo se necesita con S3
+
+    bucket = cfg["data"].get("s3_bucket")
+    if not bucket:
+        raise ValueError("data.s3_bucket vacío: define MLOPS_DATA_BUCKET")
+    client = boto3.client("s3")
+    entries = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for logical, name in _manifest_files(cfg).items():
+            key = s3_key(cfg, name)
+            head = client.head_object(Bucket=bucket, Key=key)
+            version_id = head.get("VersionId")
+            local = Path(tmp) / name
+            extra = {"VersionId": version_id} if version_id and version_id != "null" else None
+            client.download_file(bucket, key, str(local), ExtraArgs=extra)
+            modified = head.get("LastModified")
+            entries[logical] = {
+                "filename": name, "status": "registrado", "source_uri": f"s3://{bucket}/{key}",
+                "version_id": version_id, "sha256": sha256_file(local), "row_count": row_count(local),
+                "size_bytes": head.get("ContentLength"),
+                "last_modified_utc": modified.isoformat() if modified is not None else None,
+            }
+    return entries
+
+
+def _entries_from_local(cfg: dict) -> dict[str, dict]:
+    folder = release_dir(cfg)
+    entries = {}
+    for logical, name in _manifest_files(cfg).items():
+        path = folder / name
+        if not path.exists():
+            if logical in cfg["data"]["files"]:
+                raise FileNotFoundError(f"Falta {path}: el manifiesto no puede registrar la versión")
+            entries[logical] = {"filename": name, "status": "no encontrado", "source_uri": None,
+                                "version_id": None, "sha256": None}
+            continue
+        entries[logical] = {
+            "filename": name, "status": "registrado", "source_uri": path.as_posix(),
+            "version_id": None, "sha256": sha256_file(path), "row_count": row_count(path),
+            "size_bytes": path.stat().st_size,
+        }
+    return entries
+
+
 def write_manifest(cfg: dict, path: str | Path = "docs/manifiesto_datos.json") -> dict:
-    """Rellena docs/manifiesto_datos.json con SHA-256, filas, URI y (si hay S3) VersionId."""
+    """Rellena docs/manifiesto_datos.json: por archivo URI, VersionId (S3), SHA-256, filas y tamaño."""
     import json
     from datetime import datetime, timezone
 
-    manifest = data_manifest(cfg)
     base = Path(path)
     doc = json.loads(base.read_text(encoding="utf-8")) if base.exists() else {"files": []}
-    client = None
-    if cfg["data"]["source"] == "s3":
-        import boto3
-
-        client = boto3.client("s3")
+    entries = _entries_from_s3(cfg) if cfg["data"]["source"] == "s3" else _entries_from_local(cfg)
     by_name = {f["logical_name"]: f for f in doc.get("files", [])}
-    for logical, info in manifest["files"].items():
-        entry = by_name.setdefault(logical, {"logical_name": logical})
-        entry.update(filename=info["filename"], sha256=info["sha256"], row_count=info["rows"],
-                     status="registrado", source_uri=manifest["uri"] + info["filename"])
-        if client is not None:
-            head = client.head_object(
-                Bucket=cfg["data"]["s3_bucket"],
-                Key=f"{cfg['data']['s3_prefix']}/{cfg['data']['release']}/{info['filename']}",
-            )
-            entry["version_id"] = head.get("VersionId")
+    for logical, info in entries.items():
+        by_name.setdefault(logical, {"logical_name": logical}).update(info)
+    files = list(by_name.values())
+    complete = all(f.get("status") == "registrado" for f in files)
     doc.update(
-        status="registrado", dataset_release=manifest["release"],
+        status="registrado" if complete else "parcial",
+        dataset_release=str(cfg["data"]["release"]),
+        source_system=cfg["data"]["source"],
         recorded_at_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        files=list(by_name.values()),
+        temporal_policy=temporal_policy(cfg),
+        files=files,
     )
     base.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return doc
