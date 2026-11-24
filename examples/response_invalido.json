@@ -1,0 +1,7 @@
+{
+  "error": "entrada_invalida",
+  "detalle": [
+    "registro 0 (CLIENTE_SINTETICO_002): faltan features requeridas: EDAD",
+    "registro 0 (CLIENTE_SINTETICO_002): deben ser numéricas: ANTIGUEDAD"
+  ]
+}
