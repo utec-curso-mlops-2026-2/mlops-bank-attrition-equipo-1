@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StartBatchPipeline",
+      "Effect": "Allow",
+      "Action": "sagemaker:StartPipelineExecution",
+      "Resource": "arn:aws:sagemaker:us-east-1:654654589924:pipeline/equipo1-bank-attrition-batch"
+    }
+  ]
+}
