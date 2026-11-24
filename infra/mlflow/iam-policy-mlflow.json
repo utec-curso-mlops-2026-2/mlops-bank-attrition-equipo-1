@@ -1,0 +1,6 @@
+{"Version":"2012-10-17","Statement":[
+ {"Sid":"ListBucketArtifacts","Effect":"Allow","Action":"s3:ListBucket","Resource":"arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924","Condition":{"StringLike":{"s3:prefix":["mlflow-artifacts","mlflow-artifacts/*"]}}},
+ {"Sid":"RWArtifacts","Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Resource":"arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924/mlflow-artifacts/*"},
+ {"Sid":"ReadMlflowParams","Effect":"Allow","Action":["ssm:GetParameter","ssm:GetParameters"],"Resource":"arn:aws:ssm:us-east-1:654654589924:parameter/equipo1/mlflow/*"},
+ {"Sid":"DecryptViaSSM","Effect":"Allow","Action":"kms:Decrypt","Resource":"*","Condition":{"StringEquals":{"kms:ViaService":"ssm.us-east-1.amazonaws.com"}}}
+]}
