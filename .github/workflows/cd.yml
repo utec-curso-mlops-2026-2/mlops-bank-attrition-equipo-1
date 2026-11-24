@@ -24,6 +24,10 @@ env:
   PYTHONUTF8: "1"
   MLFLOW_DISABLE_AGENT_HINT: "1"
 
+defaults:
+  run:
+    shell: bash   # bash explícito = -eo pipefail: un fallo antes de `| tee` detiene el paso
+
 jobs:
   tests:
     name: Lint y pruebas
@@ -77,8 +81,15 @@ jobs:
             echo "La imagen $TAG ya existe en ECR: se reutiliza."
           else
             aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
-            docker build --build-arg GIT_COMMIT="$TAG" -t "$registry/$REPOSITORY:$TAG" .
-            docker push "$registry/$REPOSITORY:$TAG"
+            # SageMaker solo acepta manifiestos Docker v2: sin atestaciones ni media types OCI.
+            docker buildx build --provenance=false --sbom=false --build-arg GIT_COMMIT="$TAG" \
+              --output "type=image,name=$registry/$REPOSITORY:$TAG,push=true,oci-mediatypes=false" .
+          fi
+          media=$(aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" \
+            --query 'imageDetails[0].imageManifestMediaType' --output text)
+          if [ "$media" != "application/vnd.docker.distribution.manifest.v2+json" ]; then
+            echo "::error::La imagen $TAG tiene manifiesto $media; SageMaker requiere Docker v2. Cree un commit nuevo."
+            exit 1
           fi
           digest=$(aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" \
             --query 'imageDetails[0].imageDigest' --output text)
