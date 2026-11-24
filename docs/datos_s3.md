@@ -13,7 +13,11 @@ Subida (con perfil SSO/local; activar *Versioning* en el bucket para obtener `Ve
 aws s3api put-bucket-versioning --bucket <bucket> --versioning-configuration Status=Enabled
 aws s3 cp ./kaggle/ s3://<bucket>/raw/202408/ --recursive
 ```
-Ejecución: `data.source: s3`, `data.release: "202408"` en `config/config.yaml` y `MLOPS_DATA_BUCKET=<bucket>`.
+Ejecución: `MLOPS_DATA_SOURCE=s3` (por defecto `local`), `data.release: "202408"` en `config/config.yaml` y
+`MLOPS_DATA_BUCKET=<bucket>`.
+
+Salidas del scoreo (lista priorizada para retención): `s3://<bucket>/scores/<yyyymm>/scores_<yyyymm>_<yyyymmdd>_v<version>.csv`
+(ver README, sección "Salida del scoreo").
 Registro: `python -m bank_attrition.data manifest` completa `docs/manifiesto_datos.json` (SHA-256, filas, URI, VersionId).
 Cada run de MLflow guarda `data_version`, `data_uri` y `data_manifest.json`.
 

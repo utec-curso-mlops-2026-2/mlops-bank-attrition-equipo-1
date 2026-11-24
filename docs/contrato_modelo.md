@@ -18,3 +18,9 @@ model = mlflow.pyfunc.load_model("models:/bank-attrition-churn@champion")
 scores = model.predict(features_df)["probabilidad_fuga"]
 ```
 El entorno del modelo (`requirements.txt`/`conda.yaml`) se guarda junto al artefacto; instalar `mlflow==3.18.0` en batch/API.
+
+## Implementación de referencia (batch)
+`bank_attrition.score` ya aplica este contrato de punta a punta y es el núcleo del batch de R7:
+`resolve_model` (alias → versión, `feature_spec` y columnas de entrada), `build_model_input` (falla con `ValueError`
+si falta alguna columna, en vez de imputarla en silencio) y `score_table` (probabilidad, decil, segmento, ordenado).
+La API (R8) puede reutilizar `resolve_model` y `build_model_input` para garantizar el mismo tratamiento online.
