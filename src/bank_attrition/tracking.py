@@ -1,6 +1,7 @@
 """Utilidades de MLflow: servidor remoto, tags de trazabilidad y artefactos gráficos (R4)."""
 from __future__ import annotations
 
+import os
 import subprocess
 
 import matplotlib
@@ -12,12 +13,28 @@ import numpy as np  # noqa: E402
 from sklearn.metrics import ConfusionMatrixDisplay, roc_curve  # noqa: E402
 
 
+def load_mlflow_password() -> None:
+    """En AWS (SageMaker) la contraseña de MLflow se lee de SSM: nunca viaja en la imagen ni en el pipeline.
+
+    Si existe MLFLOW_TRACKING_PASSWORD (local, GitHub Actions) no hace nada.
+    """
+    parameter = os.environ.get("MLFLOW_TRACKING_PASSWORD_SSM")
+    if parameter and not os.environ.get("MLFLOW_TRACKING_PASSWORD"):
+        import boto3  # import diferido: solo en AWS
+
+        response = boto3.client("ssm").get_parameter(Name=parameter, WithDecryption=True)
+        os.environ["MLFLOW_TRACKING_PASSWORD"] = response["Parameter"]["Value"]
+
+
 def setup_mlflow(cfg: dict) -> None:
+    load_mlflow_password()
     mlflow.set_tracking_uri(cfg["mlflow"]["tracking_uri"])
     mlflow.set_experiment(cfg["mlflow"]["experiment_name"])
 
 
 def git_commit() -> str:
+    if os.environ.get("GIT_COMMIT"):  # dentro de la imagen no hay .git: el CD lo pasa al construirla
+        return os.environ["GIT_COMMIT"]
     try:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=10

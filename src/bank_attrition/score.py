@@ -40,16 +40,26 @@ OUTPUT_COLUMNS = [
 def resolve_model(cfg: dict, alias: str) -> dict:
     """Versión, run de origen, columnas de entrada y feature_spec del modelo con `alias`."""
     name = cfg["mlflow"]["registered_model_name"]
-    uri = f"models:/{name}@{alias}"
     version = MlflowClient().get_model_version_by_alias(name, alias)
+    return describe_model(cfg, str(version.version), alias, uri=f"models:/{name}@{alias}",
+                          source_run_id=version.run_id)
+
+
+def describe_model(cfg: dict, version: str, alias: str, uri: str | None = None,
+                   source_run_id: str | None = None) -> dict:
+    """Metadatos de una versión concreta (la que fijó el paso de preparación del batch)."""
+    name = cfg["mlflow"]["registered_model_name"]
+    uri = uri or f"models:/{name}/{version}"
+    if source_run_id is None:
+        source_run_id = MlflowClient().get_model_version(name, version).run_id
     info = mlflow.models.get_model_info(uri)
     inputs = [(c.name, c.type.name) for c in info.signature.inputs.inputs]
     return {
         "uri": uri,
         "name": name,
         "alias": alias,
-        "version": str(version.version),
-        "source_run_id": version.run_id,
+        "version": str(version),
+        "source_run_id": source_run_id,
         "feature_spec": info.metadata["feature_spec"],
         "numeric": [n for n, t in inputs if t == "double"],
         "categorical": [n for n, t in inputs if t != "double"],
@@ -82,10 +92,17 @@ def score_table(model, table: pd.DataFrame, model_meta: dict, cfg: dict, score_d
     if table.duplicated([id_col, period]).any():
         raise ValueError(f"El dataset de aplicación tiene más de una fila por ({id_col}, {period})")
     proba = model.predict(build_model_input(table, model_meta))[OUTPUT_COLUMN].to_numpy()
+    return finalize_scores(table[id_col].to_numpy(), table[period].to_numpy(), proba,
+                           model_meta, cfg, score_date)
+
+
+def finalize_scores(ids, periods, proba, model_meta: dict, cfg: dict, score_date: date) -> pd.DataFrame:
+    """Decil relativo, segmento y metadatos de trazabilidad (lo usan el scoreo local y el batch en AWS)."""
+    proba = np.asarray(proba, dtype="float64")
     decile = assign_decile(proba)
     out = pd.DataFrame({
-        "ID_CORRELATIVO": table[id_col].to_numpy(),
-        "CODMES": table[period].to_numpy(),
+        "ID_CORRELATIVO": np.asarray(ids),
+        "CODMES": np.asarray(periods),
         OUTPUT_COLUMN: proba,
         "decil_riesgo": decile,
         "segmento_riesgo": assign_segment(decile, cfg["scoring"]["segments"]),
@@ -126,7 +143,7 @@ def write_outputs(scores: pd.DataFrame, cfg: dict, release: str, score_date: dat
     return paths
 
 
-def _summary(scores: pd.DataFrame) -> pd.DataFrame:
+def decile_summary(scores: pd.DataFrame) -> pd.DataFrame:
     """Resumen por decil para el área de retención y para el monitoreo."""
     return (
         scores.groupby("decil_riesgo")
@@ -173,11 +190,11 @@ def run_scoring(cfg: dict, alias: str | None = None, upload: bool | None = None,
             "score_p99": float(proba.quantile(0.99)),
             **{f"share_segmento_{k.lower()}": float(v) for k, v in segment_share.items()},
         })
-        mlflow.log_table(_summary(scores), "scoring/resumen_deciles.json")
+        mlflow.log_table(decile_summary(scores), "scoring/resumen_deciles.json")
         mlflow.log_dict(model_meta["feature_spec"], "scoring/feature_spec.json")
         log_score_distribution(proba.to_numpy(), "oot")
     return {"run_id": run.info.run_id, "model_version": model_meta["version"], "rows": len(scores),
-            "paths": paths, "summary": _summary(scores)}
+            "paths": paths, "summary": decile_summary(scores)}
 
 
 def main(argv: list[str] | None = None) -> None:
