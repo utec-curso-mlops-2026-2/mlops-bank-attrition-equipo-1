@@ -29,6 +29,9 @@ def load_config(path: str | Path = "config/config.yaml") -> dict:
     with open(path, encoding="utf-8") as handle:
         cfg = _substitute(yaml.safe_load(handle))
     cfg["project"]["author"] = cfg["project"].get("author") or os.environ.get("USER") or "unknown"
+    cfg["data"]["source"] = (cfg["data"].get("source") or "local").lower()
+    if cfg["data"]["source"] not in {"local", "s3"}:
+        raise ValueError(f"data.source debe ser 'local' o 's3', no {cfg['data']['source']!r}")
     mlflow_cfg = cfg["mlflow"]
     mlflow_cfg["experiment_name"] = mlflow_cfg.get("experiment_name") or "bank-attrition"
     mlflow_cfg["tracking_uri"] = mlflow_cfg.get("tracking_uri") or mlflow_cfg["fallback_tracking_uri"]

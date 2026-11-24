@@ -7,8 +7,9 @@ project:
 
 data:
   # source: "local" lee de data/raw/<release>/ ; "s3" descarga s3://<bucket>/<prefix>/<release>/ a data/raw/<release>/
-  source: local
-  release: "202408"             # versión (fecha de corte) de los datos crudos -> raw/<yyyymm>/
+  # Se elige con la variable de entorno MLOPS_DATA_SOURCE (local | s3); sin variable usa "local".
+  source: ${MLOPS_DATA_SOURCE}
+  release: "202408"            # versión (fecha de corte) de los datos crudos -> raw/<yyyymm>/
   local_dir: data/raw
   s3_bucket: ${MLOPS_DATA_BUCKET}
   s3_prefix: raw
