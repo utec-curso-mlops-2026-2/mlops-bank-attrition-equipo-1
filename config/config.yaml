@@ -7,8 +7,9 @@ project:
 
 data:
   # source: "local" lee de data/raw/<release>/ ; "s3" descarga s3://<bucket>/<prefix>/<release>/ a data/raw/<release>/
-  source: local
-  release: "202408"             # versión (fecha de corte) de los datos crudos -> raw/<yyyymm>/
+  # Se elige con la variable de entorno MLOPS_DATA_SOURCE (local | s3); sin variable usa "local".
+  source: ${MLOPS_DATA_SOURCE}
+  release: "202408"            # versión (fecha de corte) de los datos crudos -> raw/<yyyymm>/
   local_dir: data/raw
   s3_bucket: ${MLOPS_DATA_BUCKET}
   s3_prefix: raw
@@ -86,3 +87,15 @@ registry:
   min_capture_top20: 0.55
   champion_alias: champion
   challenger_alias: challenger
+
+scoring:
+  # Scoreo batch del dataset de aplicación (OOT): python -m bank_attrition.score (núcleo de R7).
+  alias: champion               # el modelo SIEMPRE se carga del Registry por alias
+  local_dir: outputs/scores     # copia local: outputs/scores/<yyyymm>/ (ignorada por Git)
+  upload_to_s3: true            # sube a s3://<data.s3_bucket>/<s3_prefix>/<yyyymm>/ (--no-upload para omitir)
+  s3_prefix: scores
+  # Deciles relativos (1 = menor riesgo, 10 = mayor). Cada segmento empieza en el decil indicado.
+  segments:
+    Alto: 9                     # deciles 9-10: top 20 % (captura ≈ 63 % de las fugas en test)
+    Medio: 6                    # deciles 6-8
+    Bajo: 1                     # deciles 1-5

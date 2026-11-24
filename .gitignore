@@ -28,6 +28,7 @@ test-results/
 data/
 artifacts/
 reports/
+outputs/
 mlruns/
 mlartifacts/
 *.pkl
