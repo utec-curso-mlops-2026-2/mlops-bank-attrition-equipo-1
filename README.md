@@ -17,7 +17,7 @@ inferencia batch y online en AWS. Curso MLOps UTEC Posgrado 2026-2.
 | R1 Git/GitHub | Plantilla + gitflow: ver [docs/gitflow.md](docs/gitflow.md) |
 | R2 Pipeline | Implementado y probado con los datos reales: ver [docs/eda_calidad_datos.md](docs/eda_calidad_datos.md) (AUC test 0,85) |
 | R3 Datos | S3 `raw/<yyyymm>/` + manifiesto con SHA-256: [docs/datos_s3.md](docs/datos_s3.md). Feature Store: pendiente |
-| R4 MLflow | Servidor remoto: [docs/mlflow_server.md](docs/mlflow_server.md); trazabilidad implementada |
+| R4 MLflow | Servidor remoto en EC2 (`http://50.16.69.79:5000`, basic-auth, artefactos en S3): [docs/mlflow_server.md](docs/mlflow_server.md); trazabilidad implementada |
 | R5 Registry | Modelo pyfunc con preprocesamiento, signature, alias `champion`/`challenger` y gate de validación |
 | R6–R10 | Pendiente (ver contrato en [docs/contrato_modelo.md](docs/contrato_modelo.md)) |
 
@@ -29,17 +29,21 @@ tests/                    pruebas unitarias y e2e sintético (pytest)
 docs/                     contratos, decisiones, runbooks y evidencias
 examples/                 request/response de ejemplo
 .github/workflows/        ci.yml (activo), train.yml y cd.yml (R6, pendientes)
+infra/mlflow/             bootstrap, servicio systemd y políticas IAM del servidor MLflow (R4)
 ```
 
 ## Requisitos y configuración
 ```bash
 python -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-export MLFLOW_TRACKING_URI=http://<servidor-mlflow>:5000   # PowerShell: $env:MLFLOW_TRACKING_URI="..."
+export AWS_PROFILE=mlops-labs                              # perfil SSO (aws configure sso); nunca claves en el repo
+export MLFLOW_TRACKING_URI=http://50.16.69.79:5000         # PowerShell: $env:MLFLOW_TRACKING_URI="..."
 export MLFLOW_EXPERIMENT_NAME=equipo-1-fuga
-export MLOPS_DATA_BUCKET=<bucket>                          # solo si data.source: s3
-export AWS_PROFILE=<perfil-sso-o-local>                    # nunca claves en el repo
+export MLFLOW_TRACKING_USERNAME=$(aws ssm get-parameter --name /equipo1/mlflow/admin-username --query Parameter.Value --output text)
+export MLFLOW_TRACKING_PASSWORD=$(aws ssm get-parameter --name /equipo1/mlflow/admin-password --with-decryption --query Parameter.Value --output text)
+export MLOPS_DATA_BUCKET=equipo-1-mlops-bank-attrition-654654589924   # solo si data.source: s3
 ```
+Las versiones para PowerShell están en [docs/mlflow_server.md](docs/mlflow_server.md).
 Sin `MLFLOW_TRACKING_URI` el pipeline usa SQLite local (solo desarrollo; R4 exige servidor remoto compartido).
 
 ## Cómo ejecutar
