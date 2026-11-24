@@ -185,9 +185,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", default="config/config.yaml")
     parser.add_argument("--alias", default=None, help="alias del Registry (por defecto scoring.alias)")
     parser.add_argument("--no-upload", action="store_true", help="no sube el resultado a S3")
+    parser.add_argument("--output-json", help="guarda run, versión, rutas y resumen por decil en un JSON (sin datos de clientes)")
     args = parser.parse_args(argv)
     result = run_scoring(load_config(args.config), alias=args.alias,
                          upload=False if args.no_upload else None)
+    if args.output_json:
+        import json
+
+        summary = {k: result[k] for k in ("run_id", "model_version", "rows", "paths")}
+        summary["deciles"] = json.loads(result["summary"].round(6).to_json(orient="records"))
+        Path(args.output_json).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output_json).write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str) + "\n",
+                                          encoding="utf-8")
     print(f"run_id={result['run_id']} modelo_version={result['model_version']} filas={result['rows']}")
     for kind, path in result["paths"].items():
         print(f"{kind}: {path}")

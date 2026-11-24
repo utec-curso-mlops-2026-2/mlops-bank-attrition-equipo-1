@@ -187,12 +187,41 @@ def run_training(cfg: dict, register: bool = True) -> dict:
     return output
 
 
+def write_result(result: dict, path: str | Path) -> dict:
+    """Resumen serializable del entrenamiento (lo consume GitHub Actions como outputs y artefacto)."""
+    import json
+
+    registry = result.get("registry") or {}
+    summary = {
+        "run_id": result["run_id"],
+        "model_uri": result["model_uri"],
+        "best_model": result["best_model"],
+        "metrics": {k: round(float(v), 6) for k, v in result["metrics"].items()},
+        "all_metrics": {
+            name: {k: round(float(v), 6) for k, v in metrics.items()}
+            for name, metrics in result["all_metrics"].items()
+        },
+        "registered": bool(registry),
+        "model_name": registry.get("model"),
+        "model_version": registry.get("version"),
+        "validation": registry.get("validation", "not_registered"),
+        "validation_failures": registry.get("failures", []),
+        "alias": registry.get("alias"),
+    }
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return summary
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config/config.yaml")
     parser.add_argument("--no-register", action="store_true", help="solo entrena y registra el run")
+    parser.add_argument("--output-json", help="guarda el resultado (run, métricas, registro) en un JSON (para CI)")
     args = parser.parse_args(argv)
     result = run_training(load_config(args.config), register=not args.no_register)
+    if args.output_json:
+        write_result(result, args.output_json)
     print(f"run_id={result['run_id']} mejor_modelo={result['best_model']}")
     print({k: round(v, 4) for k, v in result["metrics"].items() if k.startswith("test_")})
     if "registry" in result:
