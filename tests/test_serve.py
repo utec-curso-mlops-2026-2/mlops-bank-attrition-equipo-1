@@ -94,3 +94,28 @@ def test_internal_errors_do_not_leak_traces():
     resp = TestClient(create_app(Broken(), META)).post(
         "/invocations", json=online({"EDAD": 1, "N_REQUERIMIENTOS_VENTANA": 1, "SEXO": "F"}))
     assert resp.status_code == 500 and "secreto" not in resp.text
+
+
+def test_examples_match_the_server_contract():
+    """examples/ documenta el contrato real: el request válido pasa y el inválido devuelve el detalle publicado."""
+    from pathlib import Path
+
+    folder = Path(__file__).resolve().parents[1] / "examples"
+    request = json.loads((folder / "request.json").read_text(encoding="utf-8"))
+    features = request["features"]
+    meta = {**META, "numeric": [k for k, v in features.items() if not isinstance(v, str)],
+            "categorical": [k for k, v in features.items() if isinstance(v, str)]}
+
+    class Echo:
+        def predict(self, frame):
+            return pd.DataFrame({"probabilidad_fuga": [0.2] * len(frame)})
+
+    client = TestClient(create_app(Echo(), meta))
+    ok = client.post("/invocations", json=request)
+    assert ok.status_code == 200
+    response = json.loads((folder / "response.json").read_text(encoding="utf-8"))
+    assert set(ok.json()) == set(response)
+
+    bad = client.post("/invocations", json=json.loads((folder / "request_invalido.json").read_text(encoding="utf-8")))
+    expected = json.loads((folder / "response_invalido.json").read_text(encoding="utf-8"))
+    assert bad.status_code == 422 and bad.json() == expected

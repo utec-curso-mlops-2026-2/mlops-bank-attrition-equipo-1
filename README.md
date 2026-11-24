@@ -21,7 +21,7 @@ inferencia batch y online en AWS. Curso MLOps UTEC Posgrado 2026-2.
 | R5 Registry | Modelo pyfunc con preprocesamiento, signature, alias `champion`/`challenger` y gate de validación |
 | R6 CI/CD | CI obligatorio en PR + `train.yml` (OIDC, MLflow remoto, outputs y artefactos entre jobs) + `cd.yml` (imagen en ECR y despliegue del batch al integrar a `master`): [docs/cicd.md](docs/cicd.md) |
 | R7 Batch | SageMaker Pipeline preparar → **Batch Transform** → publicar, programado con EventBridge Scheduler y logs en CloudWatch: [docs/batch_sagemaker.md](docs/batch_sagemaker.md) |
-| R8 API | Contenedor `serve` listo (JSON con validación y errores 422); despliegue del endpoint: pendiente |
+| R8 API | Contenedor `serve` listo (JSON con validación y errores 422), con request/response reales en [examples/](examples/). Despliegue del endpoint: pendiente |
 | R9 Monitoreo | PSI por variable y del score con semáforo, como paso del batch (S3 + MLflow). Plan de model/concept drift: pendiente |
 | R10 | Pendiente (ver contrato en [docs/contrato_modelo.md](docs/contrato_modelo.md)) |
 
@@ -37,6 +37,9 @@ docs/                     contratos, decisiones, runbooks y evidencias
 examples/                 request/response de ejemplo
 .github/workflows/        ci.yml (PR), train.yml (entrenamiento manual), cd.yml (despliegue al integrar a master)
 ```
+
+> **Operación y traspaso**: recursos en AWS, acceso, costos, problemas conocidos y pendientes en
+> [docs/despliegue.md](docs/despliegue.md). Decisiones de diseño en [docs/decisiones.md](docs/decisiones.md).
 
 ## Requisitos y configuración
 ```bash
@@ -89,6 +92,8 @@ run `score-<yyyymm>-<fecha>` (tag `stage=scoring`) con la distribución del scor
 7. Registry: versión con signature + input example + entorno; si cumple el gate (`registry.min_*`) recibe alias.
 8. Scoreo (`score`): carga el modelo **por alias**, construye las features del OOT con el `feature_spec` guardado en el
    modelo (no se recalcula), asigna decil y segmento, y escribe el CSV priorizado en S3 + un run de MLflow.
+9. Batch en AWS (R7): la misma lógica corre cada mes en un SageMaker Pipeline (preparar → Batch Transform → publicar)
+   disparado por EventBridge Scheduler, y además calcula el PSI de drift (R9). Ver [docs/batch_sagemaker.md](docs/batch_sagemaker.md).
 
 ## Consumo del modelo
 `mlflow.pyfunc.load_model("models:/bank-attrition-churn@champion")` → `predict(df)` devuelve `probabilidad_fuga`.
