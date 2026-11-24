@@ -45,7 +45,7 @@ def settings() -> dict:
         "mlflow_uri": env["MLFLOW_TRACKING_URI"],
         "mlflow_experiment": env.get("MLFLOW_EXPERIMENT_NAME", "equipo-1-fuga"),
         "mlflow_user": env.get("MLFLOW_TRACKING_USERNAME", "admin"),
-        "mlflow_password_ssm": env.get("MLFLOW_TRACKING_PASSWORD_SSM", "/equipo1/mlflow/admin-password"),
+        "mlflow_password_ssm": env.get("MLFLOW_AUTH_SSM_PARAMETER", "/equipo1/mlflow/admin-password"),
     }
 
 
@@ -58,7 +58,7 @@ def container_env(s: dict) -> dict[str, str]:
         "MLFLOW_TRACKING_URI": s["mlflow_uri"],
         "MLFLOW_EXPERIMENT_NAME": s["mlflow_experiment"],
         "MLFLOW_TRACKING_USERNAME": s["mlflow_user"],
-        "MLFLOW_TRACKING_PASSWORD_SSM": s["mlflow_password_ssm"],
+        "MLFLOW_AUTH_SSM_PARAMETER": s["mlflow_password_ssm"],
         "USER_NAME": "sagemaker-pipeline",
     }
 

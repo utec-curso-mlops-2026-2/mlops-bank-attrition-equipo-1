@@ -57,8 +57,15 @@ def test_no_secrets_in_definition_or_container_env(s):
     assert "no-debe-aparecer" not in text
     env = container_env(s)
     assert "MLFLOW_TRACKING_PASSWORD" not in env
-    assert env["MLFLOW_TRACKING_PASSWORD_SSM"].startswith("/equipo1/")
+    assert env["MLFLOW_AUTH_SSM_PARAMETER"].startswith("/equipo1/")
     assert env["MLOPS_DATA_SOURCE"] == "s3"
+
+
+def test_container_env_names_are_not_masked_by_sagemaker(s):
+    # SageMaker reemplaza por "HIDDEN_DUE_TO_SECURITY_REASONS" el valor de las variables del Model cuyo nombre
+    # parece sensible: el contenedor recibiría ese texto en vez de la ruta del parámetro de SSM.
+    masked_words = ("PASSWORD", "SECRET", "TOKEN", "CREDENTIAL")
+    assert not [k for k in container_env(s) if any(w in k.upper() for w in masked_words)]
 
 
 def test_model_name_is_valid_for_sagemaker(s):

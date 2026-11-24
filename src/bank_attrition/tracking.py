@@ -18,7 +18,7 @@ def load_mlflow_password() -> None:
 
     Si existe MLFLOW_TRACKING_PASSWORD (local, GitHub Actions) no hace nada.
     """
-    parameter = os.environ.get("MLFLOW_TRACKING_PASSWORD_SSM")
+    parameter = os.environ.get("MLFLOW_AUTH_SSM_PARAMETER")
     if parameter and not os.environ.get("MLFLOW_TRACKING_PASSWORD"):
         import boto3  # import diferido: solo en AWS
 
