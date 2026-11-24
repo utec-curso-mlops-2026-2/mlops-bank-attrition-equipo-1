@@ -24,6 +24,9 @@ data:
     train_requerimientos: train_requerimientos_sample.csv
     oot_clientes: oot_clientes_sample.csv
     oot_requerimientos: oot_requerimientos_sample.csv
+  # Archivos de referencia: el pipeline no los lee, pero el manifiesto (docs/manifiesto_datos.json) los versiona.
+  reference_files:
+    diccionario: diccionario_datos.xlsx
 
 schema:
   id_col: ID_CORRELATIVO
