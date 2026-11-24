@@ -19,18 +19,23 @@ inferencia batch y online en AWS. Curso MLOps UTEC Posgrado 2026-2.
 | R3 Datos | S3 `raw/<yyyymm>/` + manifiesto con SHA-256: [docs/datos_s3.md](docs/datos_s3.md). Feature Store: pendiente |
 | R4 MLflow | Servidor remoto en EC2 (`http://50.16.69.79:5000`, basic-auth, artefactos en S3): [docs/mlflow_server.md](docs/mlflow_server.md); trazabilidad implementada |
 | R5 Registry | Modelo pyfunc con preprocesamiento, signature, alias `champion`/`challenger` y gate de validación |
-| R6 CI/CD | CI obligatorio en PR + `train.yml` (OIDC, MLflow remoto, outputs y artefactos entre jobs): [docs/cicd.md](docs/cicd.md). CD: pendiente |
-| R7–R10 | Pendiente (ver contrato en [docs/contrato_modelo.md](docs/contrato_modelo.md)) |
+| R6 CI/CD | CI obligatorio en PR + `train.yml` (OIDC, MLflow remoto, outputs y artefactos entre jobs) + `cd.yml` (imagen en ECR y despliegue del batch al integrar a `master`): [docs/cicd.md](docs/cicd.md) |
+| R7 Batch | SageMaker Pipeline preparar → **Batch Transform** → publicar, programado con EventBridge Scheduler y logs en CloudWatch: [docs/batch_sagemaker.md](docs/batch_sagemaker.md) |
+| R8 API | Contenedor `serve` listo (JSON con validación y errores 422); despliegue del endpoint: pendiente |
+| R9 Monitoreo | PSI por variable y del score con semáforo, como paso del batch (S3 + MLflow). Plan de model/concept drift: pendiente |
+| R10 | Pendiente (ver contrato en [docs/contrato_modelo.md](docs/contrato_modelo.md)) |
 
 ## Estructura
 ```
 config/config.yaml        parámetros del pipeline (rutas, semillas, hiperparámetros, umbrales)
-src/bank_attrition/       config, data, features, models, metrics, tracking, train, registry, pyfunc_model, score
+src/bank_attrition/       config, data, features, models, metrics, tracking, train, registry, pyfunc_model, score,
+                          batch, serve, monitoring, container, aws_batch (inferencia y despliegue en AWS)
+infra/                    roles IAM y scripts de AWS (MLflow, GitHub OIDC, SageMaker)
+Dockerfile                imagen única de inferencia (Batch Transform y endpoint)
 tests/                    pruebas unitarias y e2e sintético (pytest)
 docs/                     contratos, decisiones, runbooks y evidencias
 examples/                 request/response de ejemplo
-.github/workflows/        ci.yml (activo), train.yml y cd.yml (R6, pendientes)
-infra/mlflow/             bootstrap, servicio systemd y políticas IAM del servidor MLflow (R4)
+.github/workflows/        ci.yml (PR), train.yml (entrenamiento manual), cd.yml (despliegue al integrar a master)
 ```
 
 ## Requisitos y configuración
@@ -55,6 +60,7 @@ python -m bank_attrition.registry promote                         # challenger -
 python -m bank_attrition.registry contract                        # signature/metadata del champion
 python -m bank_attrition.score --config config/config.yaml        # scorea el OOT con el champion y sube el CSV a S3
 python -m bank_attrition.data manifest                            # actualiza docs/manifiesto_datos.json
+python -m bank_attrition.aws_batch run --wait                     # batch en SageMaker (ver docs/batch_sagemaker.md)
 pytest && ruff check .
 ```
 

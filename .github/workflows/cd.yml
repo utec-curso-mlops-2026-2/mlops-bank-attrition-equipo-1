@@ -1,20 +1,153 @@
-name: Despliegue pendiente de implementar
+name: Despliegue (R6 CD)
 
-# Al completar la solución, integrar el disparador de master solicitado en R6.
-# Antes: CI y validación del modelo. Después: prueba de inferencia y evidencia.
-# La plantilla no despliega ni crea recursos de AWS.
+# Al integrar a master: pruebas -> imagen Docker en ECR -> SageMaker Model + Pipeline batch + schedule mensual
+# (R7) -> prueba posterior: una ejecución del pipeline completo (preparar -> Batch Transform -> publicar).
+# También se puede lanzar a mano (Actions -> Despliegue -> Run workflow) para redesplegar o probar una rama.
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
+    inputs:
+      run_batch:
+        description: Ejecutar el pipeline batch después de desplegar (prueba posterior)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: cd-production
+  cancel-in-progress: false   # nunca cortar un despliegue a medias
+
+env:
+  PYTHONUTF8: "1"
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+defaults:
+  run:
+    shell: bash   # bash explícito = -eo pipefail: un fallo antes de `| tee` detiene el paso
+
 jobs:
-  pending:
+  tests:
+    name: Lint y pruebas
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 15
     steps:
-      - name: Explicar implementación pendiente
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m ruff check .
+      - run: python -m pytest -q -p no:warnings
+
+  image:
+    name: Imagen en ECR
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write   # OIDC: credenciales temporales de AWS, sin claves guardadas
+    outputs:
+      image_uri: ${{ steps.push.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-cd-image-${{ github.run_id }}
+      - name: Construir y publicar (etiqueta = commit, inmutable)
+        id: push
+        env:
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          TAG: ${{ github.sha }}
         run: |
-          echo '::error::Implementar verificaciones, despliegue AWS y prueba posterior antes de habilitar CD.'
-          exit 1
+          account=$(aws sts get-caller-identity --query Account --output text)
+          registry="$account.dkr.ecr.$AWS_REGION.amazonaws.com"
+          if aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "La imagen $TAG ya existe en ECR: se reutiliza."
+          else
+            aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+            # SageMaker solo acepta manifiestos Docker v2: sin atestaciones ni media types OCI.
+            docker buildx build --provenance=false --sbom=false --build-arg GIT_COMMIT="$TAG" \
+              --output "type=image,name=$registry/$REPOSITORY:$TAG,push=true,oci-mediatypes=false" .
+          fi
+          media=$(aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" \
+            --query 'imageDetails[0].imageManifestMediaType' --output text)
+          if [ "$media" != "application/vnd.docker.distribution.manifest.v2+json" ]; then
+            echo "::error::La imagen $TAG tiene manifiesto $media; SageMaker requiere Docker v2. Cree un commit nuevo."
+            exit 1
+          fi
+          digest=$(aws ecr describe-images --repository-name "$REPOSITORY" --image-ids imageTag="$TAG" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          echo "image_uri=$registry/$REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
+          echo "### Imagen" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$registry/$REPOSITORY:$TAG\` → \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-batch:
+    name: Desplegar batch (SageMaker Pipeline + Scheduler)
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SAGEMAKER_ROLE_ARN: ${{ vars.SAGEMAKER_ROLE_ARN }}
+      SCHEDULER_ROLE_ARN: ${{ vars.SCHEDULER_ROLE_ARN }}
+      MLOPS_DATA_BUCKET: ${{ vars.MLOPS_DATA_BUCKET }}
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+      MLFLOW_EXPERIMENT_NAME: ${{ vars.MLFLOW_EXPERIMENT_NAME }}
+      MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+      - run: python -m pip install -e .
+      - name: Credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-cd-batch-${{ github.run_id }}
+      - name: Model + Pipeline + schedule mensual
+        env:
+          IMAGE_URI: ${{ needs.image.outputs.image_uri }}
+        run: |
+          python -m bank_attrition.aws_batch deploy --image-uri "$IMAGE_URI" --git-sha "$GITHUB_SHA" \
+            | tee outputs-deploy.json
+          {
+            echo "### Batch desplegado"
+            echo '```json'; cat outputs-deploy.json; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Prueba posterior (pipeline completo)
+        if: github.event_name == 'push' || inputs.run_batch
+        run: |
+          python -m bank_attrition.aws_batch run --wait | tee outputs-run.json
+          {
+            echo "### Ejecución del pipeline batch"
+            echo '```json'; cat outputs-run.json; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$(jq -r .status outputs-run.json)" = "Succeeded"

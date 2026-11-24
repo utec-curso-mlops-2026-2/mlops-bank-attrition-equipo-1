@@ -1,0 +1,75 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListDataBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924",
+      "Condition": {"StringLike": {"s3:prefix": ["raw/*", "batch/*", "scores/*", "monitoring/*"]}}
+    },
+    {
+      "Sid": "ReadRawAndBatch",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:GetObjectVersion"],
+      "Resource": ["arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924/raw/*", "arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924/batch/*"]
+    },
+    {
+      "Sid": "WriteBatchScoresMonitoring",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": ["arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924/batch/*", "arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924/scores/*", "arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924/monitoring/*"]
+    },
+    {
+      "Sid": "PullImage",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability"],
+      "Resource": "arn:aws:ecr:us-east-1:654654589924:repository/equipo1-bank-attrition"
+    },
+    {
+      "Sid": "EcrToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"],
+      "Resource": "arn:aws:logs:us-east-1:654654589924:log-group:/aws/sagemaker/*"
+    },
+    {
+      "Sid": "Metrics",
+      "Effect": "Allow",
+      "Action": "cloudwatch:PutMetricData",
+      "Resource": "*",
+      "Condition": {"StringLike": {"cloudwatch:namespace": ["/aws/sagemaker/*", "aws/sagemaker/*"]}}
+    },
+    {
+      "Sid": "MlflowPassword",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:us-east-1:654654589924:parameter/equipo1/mlflow/admin-password"
+    },
+    {
+      "Sid": "PipelineRunsJobs",
+      "Effect": "Allow",
+      "Action": [
+        "sagemaker:CreateProcessingJob", "sagemaker:DescribeProcessingJob", "sagemaker:StopProcessingJob",
+        "sagemaker:CreateTransformJob", "sagemaker:DescribeTransformJob", "sagemaker:StopTransformJob",
+        "sagemaker:AddTags", "sagemaker:ListTags"
+      ],
+      "Resource": [
+        "arn:aws:sagemaker:us-east-1:654654589924:processing-job/*",
+        "arn:aws:sagemaker:us-east-1:654654589924:transform-job/*"
+      ]
+    },
+    {
+      "Sid": "PassOwnRoleToJobs",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::654654589924:role/equipo1-sagemaker-execution-role",
+      "Condition": {"StringEquals": {"iam:PassedToService": "sagemaker.amazonaws.com"}}
+    }
+  ]
+}

@@ -99,3 +99,15 @@ scoring:
     Alto: 9                     # deciles 9-10: top 20 % (captura ≈ 63 % de las fugas en test)
     Medio: 6                    # deciles 6-8
     Bajo: 1                     # deciles 1-5
+
+batch:
+  # Inferencia batch en AWS (R7): SageMaker Pipeline preparar -> Batch Transform -> publicar (bank_attrition.batch).
+  s3_prefix: batch              # intermedios: s3://<bucket>/batch/<yyyymm>/<ejecucion>/{input,output}/ + manifest.json
+  input_file: registros.jsonl   # una línea JSON por cliente (Batch Transform parte la entrada por líneas)
+
+monitoring:
+  # Data drift (R9): PSI por variable y del score, población de aplicación vs. entrenamiento.
+  s3_prefix: monitoring         # s3://<bucket>/monitoring/<yyyymm>/drift_<yyyymm>_<yyyymmdd>_v<version>.{csv,json}
+  psi_bins: 10                  # bins por cuantiles de la referencia (numéricas)
+  psi_alert: 0.10               # semáforo del curso: < 0,10 estable; 0,10-0,25 alerta; > 0,25 crítico
+  psi_critical: 0.25

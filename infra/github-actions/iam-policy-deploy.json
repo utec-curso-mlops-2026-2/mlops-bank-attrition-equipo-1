@@ -1,0 +1,51 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PushImage",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:DescribeImages",
+        "ecr:GetDownloadUrlForLayer"
+      ],
+      "Resource": "arn:aws:ecr:us-east-1:654654589924:repository/equipo1-bank-attrition"
+    },
+    {
+      "Sid": "DeployBatchPipeline",
+      "Effect": "Allow",
+      "Action": [
+        "sagemaker:CreateModel", "sagemaker:DescribeModel", "sagemaker:CreatePipeline",
+        "sagemaker:UpdatePipeline", "sagemaker:DescribePipeline", "sagemaker:StartPipelineExecution",
+        "sagemaker:DescribePipelineExecution", "sagemaker:ListPipelineExecutionSteps",
+        "sagemaker:ListPipelineExecutions", "sagemaker:AddTags"
+      ],
+      "Resource": [
+        "arn:aws:sagemaker:us-east-1:654654589924:model/equipo1-bank-attrition-*",
+        "arn:aws:sagemaker:us-east-1:654654589924:pipeline/equipo1-bank-attrition-batch",
+        "arn:aws:sagemaker:us-east-1:654654589924:pipeline/equipo1-bank-attrition-batch/*"
+      ]
+    },
+    {
+      "Sid": "MonthlySchedule",
+      "Effect": "Allow",
+      "Action": ["scheduler:GetSchedule", "scheduler:CreateSchedule", "scheduler:UpdateSchedule"],
+      "Resource": "arn:aws:scheduler:us-east-1:654654589924:schedule/default/equipo1-batch-*"
+    },
+    {
+      "Sid": "PassDeployRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::654654589924:role/equipo1-sagemaker-execution-role",
+        "arn:aws:iam::654654589924:role/equipo1-scheduler-batch-role"
+      ]
+    }
+  ]
+}
