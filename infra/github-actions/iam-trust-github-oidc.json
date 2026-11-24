@@ -1,0 +1,30 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "GitHubActionsEquipo1",
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::654654589924:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": [
+            "repo:utec-curso-mlops-2026-2@337495086/mlops-bank-attrition-equipo-1@1468759043:ref:refs/heads/develop",
+            "repo:utec-curso-mlops-2026-2@337495086/mlops-bank-attrition-equipo-1@1468759043:ref:refs/heads/master",
+            "repo:utec-curso-mlops-2026-2@337495086/mlops-bank-attrition-equipo-1@1468759043:ref:refs/heads/feature/*",
+            "repo:utec-curso-mlops-2026-2/mlops-bank-attrition-equipo-1:ref:refs/heads/develop",
+            "repo:utec-curso-mlops-2026-2/mlops-bank-attrition-equipo-1:ref:refs/heads/master",
+            "repo:utec-curso-mlops-2026-2/mlops-bank-attrition-equipo-1:ref:refs/heads/feature/*",
+            "repo:utec-curso-mlops-2026-2@337495086/mlops-bank-attrition-equipo-1@1468759043:environment:production",
+            "repo:utec-curso-mlops-2026-2/mlops-bank-attrition-equipo-1:environment:production"
+          ]
+        }
+      }
+    }
+  ]
+}

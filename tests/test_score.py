@@ -99,3 +99,24 @@ def test_scoring_fails_clearly_when_columns_are_missing(trained_cfg):
     pd.read_csv(path).drop(columns=["EDAD"]).to_csv(path, index=False)
     with pytest.raises(ValueError, match="EDAD"):
         run_scoring(trained_cfg, upload=False, score_date=SCORE_DATE)
+
+
+def test_cli_json_outputs_for_ci(trained_cfg, tmp_path, monkeypatch):
+    """Los JSON que consume train.yml: resultado del entrenamiento y resumen del scoreo (sin datos de clientes)."""
+    import json
+
+    from bank_attrition import score as score_mod
+    from bank_attrition.train import write_result
+
+    trained = write_result(run_training(trained_cfg, register=True), tmp_path / "train_result.json")
+    assert trained["registered"] is True and trained["model_version"] == 2  # el fixture ya registró la v1
+    assert trained["validation"] in {"passed", "failed"}
+    assert {"test_auc", "test_ks", "test_capture_top20"} <= set(trained["metrics"])
+    assert json.loads((tmp_path / "train_result.json").read_text(encoding="utf-8")) == trained
+
+    monkeypatch.setattr(score_mod, "load_config", lambda path: trained_cfg)
+    out = tmp_path / "score_summary.json"
+    score_mod.main(["--no-upload", "--output-json", str(out)])
+    summary = json.loads(out.read_text(encoding="utf-8"))
+    assert summary["rows"] == 200 and len(summary["deciles"]) == 10
+    assert "ID_CORRELATIVO" not in out.read_text(encoding="utf-8")  # el artefacto de CI no expone clientes

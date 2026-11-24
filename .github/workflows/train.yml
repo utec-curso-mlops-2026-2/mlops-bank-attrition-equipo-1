@@ -1,19 +1,201 @@
-name: Entrenamiento pendiente de implementar
+name: Entrenamiento (R6)
 
-# El equipo debe reemplazar este bloqueo por su pipeline y configurar el acceso.
-# Este workflow inicial nunca accede a S3, MLflow ni recursos de AWS.
+# Entrena el modelo con los datos versionados de S3, registra el run en el servidor MLflow remoto,
+# lo sube al Model Registry (gate de calidad + alias) y hace una prueba de humo de scoreo por alias.
+# Se dispara manualmente (Actions -> Entrenamiento -> Run workflow) o con `gh workflow run train.yml`.
 on:
   workflow_dispatch:
+    inputs:
+      register:
+        description: Registrar el modelo en el Registry (gate de calidad + alias champion/challenger)
+        type: boolean
+        default: true
+      score_alias:
+        description: Alias con el que se hace la prueba de humo de scoreo
+        type: choice
+        options: [champion, challenger]
+        default: champion
 
 permissions:
   contents: read
 
+concurrency:
+  group: train-${{ github.ref }}
+  cancel-in-progress: false   # nunca cortar un entrenamiento a medias (dejaría runs/versiones incompletas)
+
+env:
+  PYTHONUTF8: "1"
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
 jobs:
-  pending:
+  tests:
+    name: Lint y pruebas
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 15
     steps:
-      - name: Explicar implementación pendiente
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m ruff check .
+      - run: python -m pytest -q -p no:warnings
+
+  train:
+    name: Entrenar y registrar
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env: # variables y secretos solo en los jobs que acceden a AWS/MLflow
+      MLOPS_DATA_SOURCE: s3
+      MLOPS_DATA_BUCKET: ${{ vars.MLOPS_DATA_BUCKET }}
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+      MLFLOW_EXPERIMENT_NAME: ${{ vars.MLFLOW_EXPERIMENT_NAME }}
+      MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+      USER_NAME: github-actions/${{ github.actor }}
+    permissions:
+      contents: read
+      id-token: write   # OIDC: credenciales temporales de AWS, sin claves guardadas
+    outputs:
+      run_id: ${{ steps.result.outputs.run_id }}
+      best_model: ${{ steps.result.outputs.best_model }}
+      model_version: ${{ steps.result.outputs.model_version }}
+      validation: ${{ steps.result.outputs.validation }}
+      alias: ${{ steps.result.outputs.alias }}
+      test_auc: ${{ steps.result.outputs.test_auc }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+      - run: python -m pip install -e .
+      - name: Credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-train-${{ github.run_id }}
+      - name: Verificar servidor MLflow
         run: |
-          echo '::error::Implementar entrenamiento, validación, trazabilidad y registro antes de habilitar este workflow.'
-          exit 1
+          code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$MLFLOW_TRACKING_URI/health" || true)
+          if [ "$code" != "200" ]; then
+            echo "::error::El servidor MLflow ($MLFLOW_TRACKING_URI) no responde (HTTP $code). ¿La EC2 equipo1-mlflow está encendida? Ver docs/mlflow_server.md"
+            exit 1
+          fi
+      - name: Entrenar
+        run: |
+          args=(--config config/config.yaml --output-json outputs/train_result.json)
+          if [ "${{ inputs.register }}" != "true" ]; then args+=(--no-register); fi
+          python -W ignore -m bank_attrition.train "${args[@]}"
+      - name: Publicar outputs
+        id: result
+        run: |
+          r=outputs/train_result.json
+          {
+            echo "run_id=$(jq -r .run_id $r)"
+            echo "best_model=$(jq -r .best_model $r)"
+            echo "model_version=$(jq -r '.model_version // ""' $r)"
+            echo "validation=$(jq -r .validation $r)"
+            echo "alias=$(jq -r '.alias // ""' $r)"
+            echo "test_auc=$(jq -r '.metrics.test_auc' $r)"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Entrenamiento"
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Run MLflow | \`$(jq -r .run_id $r)\` |"
+            echo "| Mejor modelo | $(jq -r .best_model $r) |"
+            echo "| AUC / KS / captura top 20 % (test) | $(jq -r '[.metrics.test_auc, .metrics.test_ks, .metrics.test_capture_top20] | map(.*1000|round/1000) | join(" / ")' $r) |"
+            echo "| Versión registrada | $(jq -r '.model_version // "—"' $r) |"
+            echo "| Gate de calidad | $(jq -r .validation $r) $(jq -r '.validation_failures | join("; ")' $r) |"
+            echo "| Alias asignado | $(jq -r '.alias // "ninguno"' $r) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Guardar resultado del entrenamiento
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: train-result-${{ github.run_id }}
+          path: outputs/train_result.json
+          if-no-files-found: error
+
+  smoke-score:
+    name: Prueba de humo (scoreo por alias)
+    needs: train
+    if: needs.train.outputs.validation != 'failed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env: # variables y secretos solo en los jobs que acceden a AWS/MLflow
+      MLOPS_DATA_SOURCE: s3
+      MLOPS_DATA_BUCKET: ${{ vars.MLOPS_DATA_BUCKET }}
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+      MLFLOW_EXPERIMENT_NAME: ${{ vars.MLFLOW_EXPERIMENT_NAME }}
+      MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+      USER_NAME: github-actions/${{ github.actor }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+      - run: python -m pip install -e .
+      - name: Credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-smoke-${{ github.run_id }}
+      - name: Scorear el OOT por alias (sin subir a S3)
+        env:
+          ALIAS: ${{ inputs.score_alias }}
+        run: |
+          python -W ignore -m bank_attrition.score --config config/config.yaml --alias "$ALIAS" \
+            --no-upload --output-json outputs/score_summary.json
+      - name: Validar la salida
+        env:
+          TRAINED_VERSION: ${{ needs.train.outputs.model_version }}
+          TRAINED_ALIAS: ${{ needs.train.outputs.alias }}
+          ALIAS: ${{ inputs.score_alias }}
+        run: |
+          s=outputs/score_summary.json
+          test "$(jq '.rows' $s)" -gt 0
+          test "$(jq '.deciles | length' $s)" -eq 10
+          used=$(jq -r .model_version $s)
+          echo "Versión usada por el scoreo ($ALIAS): v$used | versión entrenada: v${TRAINED_VERSION:-—} (alias ${TRAINED_ALIAS:-ninguno})"
+          {
+            echo "## Prueba de humo de scoreo"
+            echo "Alias \`$ALIAS\` → versión **v$used**, $(jq .rows $s) clientes (sin subir a S3)."
+            echo ""
+            echo "| Decil | Clientes | Prob. media | Segmento |"
+            echo "|---|---|---|---|"
+            jq -r '.deciles[] | "| \(.decil_riesgo) | \(.clientes) | \(.prob_media*1000|round/1000) | \(.segmento) |"' $s
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Guardar resumen (sin datos de clientes)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: score-summary-${{ github.run_id }}
+          path: outputs/score_summary.json
+          if-no-files-found: error

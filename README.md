@@ -19,7 +19,8 @@ inferencia batch y online en AWS. Curso MLOps UTEC Posgrado 2026-2.
 | R3 Datos | S3 `raw/<yyyymm>/` + manifiesto con SHA-256: [docs/datos_s3.md](docs/datos_s3.md). Feature Store: pendiente |
 | R4 MLflow | Servidor remoto en EC2 (`http://50.16.69.79:5000`, basic-auth, artefactos en S3): [docs/mlflow_server.md](docs/mlflow_server.md); trazabilidad implementada |
 | R5 Registry | Modelo pyfunc con preprocesamiento, signature, alias `champion`/`challenger` y gate de validación |
-| R6–R10 | Pendiente (ver contrato en [docs/contrato_modelo.md](docs/contrato_modelo.md)) |
+| R6 CI/CD | CI obligatorio en PR + `train.yml` (OIDC, MLflow remoto, outputs y artefactos entre jobs): [docs/cicd.md](docs/cicd.md). CD: pendiente |
+| R7–R10 | Pendiente (ver contrato en [docs/contrato_modelo.md](docs/contrato_modelo.md)) |
 
 ## Estructura
 ```

@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListRawData",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "raw/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadRawData",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::equipo-1-mlops-bank-attrition-654654589924/raw/*"
+    }
+  ]
+}
