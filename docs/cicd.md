@@ -4,7 +4,7 @@
 |---|---|---|---|
 | `ci.yml` | PR y push a `develop`/`master` | Instalación, `ruff` y `pytest`. Es un **check obligatorio** del ruleset: si falla, el PR no se puede integrar | Activo |
 | `train.yml` | Manual (`workflow_dispatch`) | Pruebas → entrenamiento contra MLflow remoto con datos de S3 → registro con gate y alias → prueba de humo de scoreo | Activo |
-| `cd.yml` | Merge a `master` | Construir y desplegar el batch (R7) y la API (R8) en AWS | Pendiente (fase 4) |
+| `cd.yml` | Push a `master` (merge de un PR) y manual | Pruebas → imagen Docker en ECR (etiqueta = commit) → SageMaker Model + Pipeline batch + schedule mensual (R7) → **prueba posterior**: una ejecución completa del pipeline | Activo (endpoint R8: pendiente) |
 
 ## Acceso a AWS sin claves: OIDC
 GitHub Actions asume el rol **`equipo1-github-actions-role`** con credenciales temporales (1 h). En el repo no hay
@@ -17,7 +17,12 @@ claves de AWS. La definición del rol está en [`infra/github-actions/`](../infr
   - Una política escrita solo con `repo:<org>/<repo>:...` **no funciona** en este repo.
   - Nuestro permiso SSO puede crear roles, pero no editar su política de confianza después (`UpdateAssumeRolePolicy`
     solo aplica a `mlops-s13-*`). Para cambiarla hay que recrear el rol.
-- **Permisos** (mínimos): leer `raw/*` del bucket de datos. Los permisos de despliegue se agregan con el CD.
+- **Permisos** (mínimos):
+  - `equipo1-train`: leer `raw/*` del bucket de datos.
+  - `equipo1-github-actions-deploy` ([`iam-policy-deploy.json`](../infra/github-actions/iam-policy-deploy.json)):
+    publicar en el repositorio ECR del equipo, crear o actualizar el Model, el Pipeline y los schedules
+    `equipo1-batch-*`, y pasar solo los roles de SageMaker y del Scheduler.
+- El job de despliegue usa el environment **`production`**, así que el token OIDC lleva ese *subject*.
 
 ## Variables y secretos (Settings → Secrets and variables → Actions)
 | Nombre | Tipo | Valor / origen |
@@ -29,6 +34,11 @@ claves de AWS. La definición del rol está en [`infra/github-actions/`](../infr
 | `MLFLOW_EXPERIMENT_NAME` | variable | `equipo-1-fuga` |
 | `MLFLOW_TRACKING_USERNAME` | variable | `admin` |
 | `MLFLOW_TRACKING_PASSWORD` | **secret** | copia de SSM `/equipo1/mlflow/admin-password` |
+| `ECR_REPOSITORY` | variable | `equipo1-bank-attrition` |
+| `SAGEMAKER_ROLE_ARN` | variable | `arn:aws:iam::654654589924:role/equipo1-sagemaker-execution-role` |
+| `SCHEDULER_ROLE_ARN` | variable | `arn:aws:iam::654654589924:role/equipo1-scheduler-batch-role` |
+
+En AWS, los contenedores de SageMaker **no** reciben la contraseña: la leen de SSM con su rol.
 
 Los valores sensibles solo se pasan a los jobs que los usan (`train`, `smoke-score`). El job de pruebas no los recibe.
 
@@ -61,3 +71,15 @@ gh run watch            # seguir la ejecución
 |---|---|---|
 | `401 You are not authenticated` en el job `train` | El secret se había guardado desde PowerShell con un salto de línea al final | Volver a cargarlo sin salto de línea: `aws ssm get-parameter ... --output text \| tr -d '\r\n' \| gh secret set MLFLOW_TRACKING_PASSWORD` |
 | `ParameterNotFound` al leer `/equipo1/...` desde **Git Bash** en Windows | Git Bash convierte los argumentos que empiezan con `/` en rutas de Windows | `export MSYS_NO_PATHCONV=1` antes del comando, o usar PowerShell |
+
+## `cd.yml`
+```text
+tests ──► image (OIDC, docker build/push a ECR, output image_uri por digest) ──► deploy-batch (environment production)
+                                                                                  ├─ aws_batch deploy: Model + Pipeline + schedule
+                                                                                  └─ aws_batch run --wait: prueba posterior
+```
+- Las imágenes se etiquetan con el commit y el repositorio ECR es **inmutable**. Si se relanza el mismo commit, se
+  reutiliza la imagen.
+- Cada commit tiene su propio SageMaker Model (`equipo1-bank-attrition-<commit>`). El pipeline se actualiza para
+  apuntar a él, así que volver a una versión anterior es relanzar el CD sobre ese commit.
+- Detalle del batch: [batch_sagemaker.md](batch_sagemaker.md).
